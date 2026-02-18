@@ -18,7 +18,6 @@
 // EEPROM
 #define EEPROM_ADDR 0
 #define EEPROM_SAVE_INTERVAL 10  // Save every 10 updates
-#define ROLLING_WINDOW 256       // Number of codes to check ahead
 
 static const uint32_t CAR_ID    = 0xCAFEBABE;
 static const uint32_t KEYFOB_ID = 0x12345678;
@@ -135,19 +134,15 @@ bool validatePacket(Packet &pkt) {
     return false;
   }
 
-  Serial.printf("Validating: RC=%lu, TOTP=%lu, LastCounter=%lu\n", 
-                pkt.rollingCode, pkt.totp, lastRollingCounter);
+  Serial.printf("Validating: RC=%lu, TOTP=%lu\n", pkt.rollingCode, pkt.totp);
   
   // Check rolling code window (256 codes ahead)
-  // Use a regular counter to prevent overflow issues
-  for (uint16_t offset = 0; offset < ROLLING_WINDOW; offset++) {
+  for (uint32_t i = lastRollingCounter; i < lastRollingCounter + 256; i++) {
     yield(); // CRITICAL: Feed watchdog in loop
     
-    uint32_t testCounter = lastRollingCounter + offset;
-    
-    if (pkt.rollingCode == generateRollingCode(testCounter)) {
-      Serial.printf("Rolling code valid (counter=%lu)\n", testCounter);
-      lastRollingCounter = testCounter + 1;
+    if (pkt.rollingCode == generateRollingCode(i)) {
+      Serial.printf("Rolling code valid (counter=%lu)\n", i);
+      lastRollingCounter = i + 1;
       
       // Save counter periodically to reduce EEPROM wear
       if (lastRollingCounter - lastSavedCounter >= EEPROM_SAVE_INTERVAL) {
@@ -159,27 +154,17 @@ bool validatePacket(Packet &pkt) {
 
       yield(); // Feed before TOTP generation
       
-      // Validate TOTP (check current and previous 30-second window)
-      uint32_t currentEpoch = (millis() / 1000) / 30;
-      uint32_t currentTOTP = generateTOTP(currentEpoch);
+      // Validate TOTP
+      uint32_t epoch = (millis() / 1000) / 30;
+      uint32_t valid = generateTOTP(epoch);
       
-      if (pkt.totp == currentTOTP) {
-        Serial.println("TOTP valid (current window)!");
-        return true;
-      }
-      
-      yield();
-      
-      // Check previous window in case of timing issues
-      uint32_t prevTOTP = generateTOTP(currentEpoch - 1);
-      if (pkt.totp == prevTOTP) {
-        Serial.println("TOTP valid (previous window)!");
+      if (pkt.totp == valid) {
+        Serial.println("TOTP valid!");
         return true;
       }
 
       // TOTP mismatch - send sync
-      Serial.printf("TOTP mismatch! Expected=%lu or %lu, Got=%lu\n", 
-                    currentTOTP, prevTOTP, pkt.totp);
+      Serial.printf("TOTP mismatch! Expected=%lu, Got=%lu\n", valid, pkt.totp);
       
       yield();
       noInterrupts();
@@ -189,10 +174,10 @@ bool validatePacket(Packet &pkt) {
       delay(50);
       yield();
       
-      int32_t timeOffset = 0; // Time offset to send back
-      ELECHOUSE_cc1101.SendData((uint8_t*)&timeOffset, sizeof(timeOffset));
+      int32_t offset = 0; // Time offset to send back
+      ELECHOUSE_cc1101.SendData((uint8_t*)&offset, sizeof(offset));
       
-      delay(100); // Give more time for transmission
+      delay(50);
       yield();
       
       noInterrupts();
@@ -205,8 +190,8 @@ bool validatePacket(Packet &pkt) {
       return false;
     }
     
-    // Yield every 8 iterations to prevent WDT timeout
-    if (offset % 8 == 0) {
+    // Yield every 16 iterations to prevent WDT timeout
+    if ((i - lastRollingCounter) % 16 == 0) {
       yield();
     }
   }
@@ -219,13 +204,13 @@ bool validatePacket(Packet &pkt) {
 void lockCar() {
   digitalWrite(LED_GREEN, LOW);
   digitalWrite(LED_RED, HIGH);
-  Serial.println("\n>>> CAR LOCKED <<<\n");
+  Serial.println(">>> CAR LOCKED <<<");
 }
 
 void unlockCar() {
   digitalWrite(LED_RED, LOW);
   digitalWrite(LED_GREEN, HIGH);
-  Serial.println("\n>>> CAR UNLOCKED <<<\n");
+  Serial.println(">>> CAR UNLOCKED <<<");
 }
 
 // ============= SETUP & LOOP =============
@@ -248,15 +233,6 @@ void setup() {
   lockCar(); // Default to locked state
   
   EEPROM.get(EEPROM_ADDR, lastRollingCounter);
-  
-  // Check for corrupted/invalid counter value
-  if (lastRollingCounter == 0xFFFFFFFF || lastRollingCounter > 0xFFFFFF00) {
-    Serial.println("WARNING: Counter corrupted or near overflow, resetting to 0");
-    lastRollingCounter = 0;
-    EEPROM.put(EEPROM_ADDR, lastRollingCounter);
-    EEPROM.commit();
-  }
-  
   lastSavedCounter = lastRollingCounter;
   Serial.printf("Last rolling counter: %lu\n", lastRollingCounter);
   yield();
@@ -289,7 +265,7 @@ void loop() {
     yield();
     
     byte len = ELECHOUSE_cc1101.ReceiveData(rxBuffer);
-    Serial.printf("\n[RX] Received %d bytes\n", len);
+    Serial.printf("Received %d bytes\n", len);
     
     if (len == sizeof(Packet)) {
       Packet pkt;
@@ -298,7 +274,7 @@ void loop() {
       yield(); // Feed before validation (this can take time)
       
       if (validatePacket(pkt)) {
-        Serial.println("[OK] Packet VALID");
+        Serial.println("Packet VALID");
         
         if (pkt.action == ACTION_UNLOCK) {
           unlockCar();
@@ -306,10 +282,10 @@ void loop() {
           lockCar();
         }
       } else {
-        Serial.println("[FAIL] Packet INVALID");
+        Serial.println("Packet INVALID");
       }
     } else {
-      Serial.printf("[ERR] Wrong packet size: %d (expected %d)\n", len, sizeof(Packet));
+      Serial.printf("Wrong packet size: %d (expected %d)\n", len, sizeof(Packet));
     }
     
     yield();
