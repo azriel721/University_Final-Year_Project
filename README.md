@@ -14,11 +14,18 @@ Standard automotive RKE systems (like KeeLoq) rely on simple rolling codes. Whil
 * **Replay Attack:** Capturing a valid RF signal and replaying it later to gain unauthorized access.
 * **RollJam Attack:** Jamming the receiver while sniffing the signal to steal an "unused" rolling code.
 
-### 🎥 Demonstration: Traditional Replay Attack
-In this video, I demonstrate how a traditional car's security can be bypassed using simple sub-GHz tools.
+## 🎥 Demonstration: Traditional Replay Attack
+Below is a demonstration of a successful replay attack performed on a standard vehicle. By capturing the 433MHz signal and replaying it, the security is bypassed. Our project prevents this by ensuring that by the time the attacker tries to replay the signal, the **TOTP has already expired**.
 
-https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/blob/main/media/YOUR_VIDEO_NAME.mp4?raw=true
+[]
 
+<p align="center">
+  <video src="Media/replay demo.mp4" width="700" controls>
+    Your browser does not support the video tag.
+  </video>
+</p>
+
+*Note: The video above shows the vulnerability our system is designed to solve.*
 
 
 ---
