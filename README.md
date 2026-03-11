@@ -15,7 +15,9 @@ Standard automotive RKE systems (like KeeLoq) rely on simple rolling codes. Whil
 * **RollJam Attack:** Jamming the receiver while sniffing the signal to steal an "unused" rolling code.
 
 ### 🎥 Demonstration: Traditional Replay Attack
-In this video, I demonstrate how a traditional car's security can be bypassed using simple sub-GHz tools before applying our multi-layer defense.
+In this video, I demonstrate how a traditional car's security can be bypassed using simple sub-GHz tools.
+
+https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/blob/main/media/YOUR_VIDEO_NAME.mp4?raw=true
 
 
 
