@@ -17,7 +17,7 @@ Standard automotive RKE systems (like KeeLoq) rely on simple rolling codes. Whil
 ## 🎥 Demonstration: Traditional Replay Attack
 Below is a demonstration of a successful replay attack performed on a standard vehicle. By capturing the 433MHz signal and replaying it, the security is bypassed. Our project prevents this by ensuring that by the time the attacker tries to replay the signal, the **TOTP has already expired**.
 
-https://github.com/azriel721/University_Final-Year_Project/blob/main/Media/replay_demo.mp4
+![replay_demo](https://github.com/user-attachments/assets/ca3873ef-605c-44a4-a248-fc31b7e4ed89)
 
 *Note: The video above shows the vulnerability our system is designed to solve.*
 
