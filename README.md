@@ -36,8 +36,18 @@ To mitigate these attacks, this project implements a 3-tier validation process:
 ## 🔌 Hardware & Wiring
 The system consists of a **Keyfob (Transmitter)** and a **Car (Receiver)** using ESP32 MCUs and CC1101 modules.
 
+* **SPI (CC1101):** MOSI (23), MISO (19), SCK (18), CSN (5), GDO0 (2).
+* **Inputs (Keyfob):** GPIO 25 (Unlock), GPIO 26 (Lock).
+* **Outputs (Car):** GPIO 16 (Green LED), GPIO 17 (Red LED).
 
+<p align="center">
+  <img src="Media/key.jpg" alt="ESP32 CC1101 Wiring Diagram" width="700">
+</p>
 
-### **Peripheral Connections**
-* **Keyfob:** Buttons on **GPIO 25** (Unlock) and **GPIO 26** (Lock).
-* **Car Receiver:** LEDs on **GPIO 16** (Green/Unlock) and **GPIO 17** (Red/Lock).
+<p align="center">
+  <img src="Media/car (1).jpg" alt="ESP32 CC1101 Wiring Diagram" width="700">
+</p>
+
+<p align="center">
+  <img src="Media/car (3).jpg" alt="ESP32 CC1101 Wiring Diagram" width="700">
+</p>
