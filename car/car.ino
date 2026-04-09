@@ -295,7 +295,7 @@ void setup() {
   delay(500);
   
   Serial.println(F("\n\n╔═══════════════════════════════╗"));
-  Serial.println(F("║  SECURE CAR RECEIVER v6.2     ║"));
+  Serial.println(F("║  SECURE CAR RECEIVER ESP32    ║"));
   Serial.println(F("╚═══════════════════════════════╝\n"));
   
   EEPROM.begin(512);
