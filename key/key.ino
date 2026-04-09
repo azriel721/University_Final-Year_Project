@@ -13,118 +13,127 @@
 #define ACTION_LOCK   1
 
 // Buttons
-#define BTN_UNLOCK D3   // GPIO0
-#define BTN_LOCK   D4   // GPIO2
+#define BTN_UNLOCK 25   // GPIO25
+#define BTN_LOCK   26   // GPIO26
 
 // EEPROM
 #define EEPROM_ADDR 0
 #define EEPROM_SAVE_INTERVAL 10
 
 // Debouncing
-#define DEBOUNCE_DELAY 200  // Increased debounce
+#define DEBOUNCE_DELAY 50
+
+// TOTP
+#define TOTP_INTERVAL 5
+#define MSG_TIME_SYNC 0x02
 
 static const uint32_t CAR_ID    = 0xCAFEBABE;
 static const uint32_t KEYFOB_ID = 0x12345678;
 
-static const uint8_t  ROLLING_KEY[16] = {
+static const uint8_t ROLLING_KEY[16] = {
   0x12,0x34,0x56,0x78,0x9A,0xBC,0xDE,0xF0,
   0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88
 };
 
-static const uint8_t  TOTP_SECRET[20] = {
+static const uint8_t PACKET_KEY[16] = {
+  0xFE,0xDC,0xBA,0x98,0x76,0x54,0x32,0x10,
+  0xFF,0xEE,0xDD,0xCC,0xBB,0xAA,0x99,0x88
+};
+
+static const uint8_t TOTP_SECRET[20] = {
   0xAB,0xCD,0xEF,0x01,0x23,0x45,0x67,0x89,
   0xAA,0xBB,0xCC,0xDD,0xEE,0xFF,0x12,0x34,
   0x56,0x78,0x9A,0xBC
 };
 
 // Packet structure
+#pragma pack(push, 1)
 struct Packet {
   uint32_t carID;
   uint32_t keyfobID;
   uint8_t  action;
   uint32_t rollingCode;
   uint32_t totp;
+  uint32_t timestamp;
 };
 
-// Global buffer for received data
-uint8_t cc1101_data_buffer[61];
+struct TimeSyncMessage {
+  uint8_t type;
+  uint32_t timestamp;
+  uint8_t checksum;
+};
+#pragma pack(pop)
 
+// Global variables
+uint8_t cc1101_data_buffer[61];
 uint32_t rollingCounter = 0;
 uint32_t lastSavedCounter = 0;
-int32_t timeOffset = 0;
+uint32_t currentTime = 0;
+unsigned long lastSecondUpdate = 0;
 
-// Debouncing variables
+// Debouncing
 unsigned long lastUnlockPress = 0;
 unsigned long lastLockPress = 0;
 bool unlockProcessed = false;
 bool lockProcessed = false;
 
-// Pre-initialized crypto objects to avoid re-initialization overhead
-AES128 aes;
-SHA256 sha256;
-
-// defining PINs set for ESP8266 - WEMOS D1 MINI module
-byte sck = 14;
-byte miso = 12;
-byte mosi = 13;
-byte ss = 15;
-int gdo0 = 5;
+// CC1101 pins
+byte sck = 18;
+byte miso = 19;
+byte mosi = 23;
+byte ss = 5;
+int gdo0 = 2;
 int gdo2 = 4;
 
-static void cc1101initialize(void)
-{
-    ELECHOUSE_cc1101.setSpiPin(sck, miso, mosi, ss);
-    ELECHOUSE_cc1101.setGDO(gdo0, gdo2);
+// ================= CC1101 =================
 
-    ELECHOUSE_cc1101.Init();
-    ELECHOUSE_cc1101.setGDO0(gdo0);
-    ELECHOUSE_cc1101.setCCMode(1);
-    ELECHOUSE_cc1101.setModulation(2);
-    ELECHOUSE_cc1101.setMHZ(433.92);
-    ELECHOUSE_cc1101.setDeviation(47.60);
-    ELECHOUSE_cc1101.setChannel(0);
-    ELECHOUSE_cc1101.setChsp(199.95);
-    ELECHOUSE_cc1101.setRxBW(812.50);
-    ELECHOUSE_cc1101.setDRate(9.6);
-    ELECHOUSE_cc1101.setPA(10);
-    ELECHOUSE_cc1101.setSyncMode(2);
-    ELECHOUSE_cc1101.setSyncWord(211, 145);
-    ELECHOUSE_cc1101.setAdrChk(0);
-    ELECHOUSE_cc1101.setAddr(0);
-    ELECHOUSE_cc1101.setWhiteData(0);
-    ELECHOUSE_cc1101.setPktFormat(0);
-    ELECHOUSE_cc1101.setLengthConfig(1);
-    ELECHOUSE_cc1101.setPacketLength(0);
-    ELECHOUSE_cc1101.setCrc(0);
-    ELECHOUSE_cc1101.setCRC_AF(0);
-    ELECHOUSE_cc1101.setDcFilterOff(0);
-    ELECHOUSE_cc1101.setManchester(0);
-    ELECHOUSE_cc1101.setFEC(0);
-    ELECHOUSE_cc1101.setPRE(0);
-    ELECHOUSE_cc1101.setPQT(0);
-    ELECHOUSE_cc1101.setAppendStatus(0);
+void cc1101initialize(void) {
+  ELECHOUSE_cc1101.setSpiPin(sck, miso, mosi, ss);
+  ELECHOUSE_cc1101.setGDO(gdo0, gdo2);
+
+  ELECHOUSE_cc1101.Init();
+  ELECHOUSE_cc1101.setGDO0(gdo0);
+  ELECHOUSE_cc1101.setCCMode(1);
+  ELECHOUSE_cc1101.setModulation(2);
+  ELECHOUSE_cc1101.setMHZ(433.92);
+  ELECHOUSE_cc1101.setDeviation(47.60);
+  ELECHOUSE_cc1101.setChannel(0);
+  ELECHOUSE_cc1101.setChsp(199.95);
+  ELECHOUSE_cc1101.setRxBW(812.50);
+  ELECHOUSE_cc1101.setDRate(9.6);
+  ELECHOUSE_cc1101.setPA(10);
+  ELECHOUSE_cc1101.setSyncMode(2);
+  ELECHOUSE_cc1101.setSyncWord(211, 145);
+  ELECHOUSE_cc1101.setAdrChk(0);
+  ELECHOUSE_cc1101.setAddr(0);
+  ELECHOUSE_cc1101.setWhiteData(0);
+  ELECHOUSE_cc1101.setPktFormat(0);
+  ELECHOUSE_cc1101.setLengthConfig(1);
+  ELECHOUSE_cc1101.setPacketLength(0);
+  ELECHOUSE_cc1101.setCrc(0);
+  ELECHOUSE_cc1101.setCRC_AF(0);
+  ELECHOUSE_cc1101.setDcFilterOff(0);
+  ELECHOUSE_cc1101.setManchester(0);
+  ELECHOUSE_cc1101.setFEC(0);
+  ELECHOUSE_cc1101.setPRE(0);
+  ELECHOUSE_cc1101.setPQT(0);
+  ELECHOUSE_cc1101.setAppendStatus(0);
 }
 
+// ================= CRYPTO =================
+
 uint32_t generateRollingCode(uint32_t counter) {
-  yield(); // Feed watchdog before crypto operation
-  
-  aes.setKey(ROLLING_KEY, 16); 
-  yield(); // Feed watchdog after setKey
-  
-  uint8_t input[16] = {0}; 
+  AES128 aes;
+  aes.setKey(ROLLING_KEY, 16);
+  uint8_t input[16] = {0};
   memcpy(input, &counter, sizeof(counter));
-  
   uint8_t out[16];
   aes.encryptBlock(out, input);
-  
-  yield(); // Feed watchdog after encryption
-  
-  return *(uint32_t*)out; 
+  return *(uint32_t*)out;
 }
 
 uint32_t generateTOTP(uint32_t epoch) {
-  yield(); // Feed watchdog before crypto operation
-  
+  SHA256 sha256;
   uint8_t msg[8];
   for (int i = 7; i >= 0; i--) {
     msg[i] = epoch & 0xFF;
@@ -132,28 +141,40 @@ uint32_t generateTOTP(uint32_t epoch) {
   }
   
   sha256.resetHMAC(TOTP_SECRET, sizeof(TOTP_SECRET));
-  yield(); // Feed watchdog after reset
-  
   sha256.update(msg, 8);
-  yield(); // Feed watchdog after update
-  
-  uint8_t hash[SHA256::HASH_SIZE]; 
+  uint8_t hash[SHA256::HASH_SIZE];
   sha256.finalizeHMAC(TOTP_SECRET, sizeof(TOTP_SECRET), hash, sizeof(hash));
-  yield(); // Feed watchdog after finalize
   
-  int offset = hash[SHA256::HASH_SIZE - 1] & 0x0F; 
-
+  int offset = hash[SHA256::HASH_SIZE - 1] & 0x0F;
   uint32_t binary = ((hash[offset] & 0x7F) << 24) |
                     ((hash[offset+1] & 0xFF) << 16) |
                     ((hash[offset+2] & 0xFF) << 8) |
                     (hash[offset+3] & 0xFF);
-                    
   return binary % 1000000;
 }
 
+void encryptPacket(const Packet* plainPacket, uint8_t* encryptedData) {
+  AES128 aes;
+  aes.setKey(PACKET_KEY, 16);
+  
+  uint8_t plaintext[32];
+  memset(plaintext, 0, 32);
+  memcpy(plaintext, plainPacket, sizeof(Packet));
+  
+  aes.encryptBlock(encryptedData, plaintext);
+  aes.encryptBlock(encryptedData + 16, plaintext + 16);
+}
+
+uint8_t calcChecksum(uint8_t* data, int len) {
+  uint8_t cs = 0;
+  for (int i = 0; i < len; i++) cs ^= data[i];
+  return cs;
+}
+
+// ================= PACKET SEND =================
+
 void saveCounterIfNeeded() {
   if (rollingCounter - lastSavedCounter >= EEPROM_SAVE_INTERVAL) {
-    yield();
     EEPROM.put(EEPROM_ADDR, rollingCounter);
     EEPROM.commit();
     lastSavedCounter = rollingCounter;
@@ -162,175 +183,235 @@ void saveCounterIfNeeded() {
 }
 
 void sendPacket(uint8_t action) {
-  yield(); // Feed watchdog at start
-  
-  Serial.printf("Building packet (action=%d, counter=%lu)...\n", action, rollingCounter);
+  Serial.println(F("\n>>> SENDING PACKET <<<"));
   
   Packet pkt;
   pkt.carID = CAR_ID;
   pkt.keyfobID = KEYFOB_ID;
   pkt.action = action;
-  
-  yield(); // Feed before crypto
   pkt.rollingCode = generateRollingCode(rollingCounter++);
-  
-  yield(); // Feed before TOTP
-  uint32_t epoch = (millis()/1000 + timeOffset) / 30;
+  uint32_t epoch = currentTime / TOTP_INTERVAL;
   pkt.totp = generateTOTP(epoch);
+  pkt.timestamp = currentTime;
 
-  yield(); // Feed before sending
-  Serial.printf("Sending: RC=%lu, TOTP=%lu\n", pkt.rollingCode, pkt.totp);
+  Serial.printf("Action: %d, RC: %lu, TOTP: %lu, Time: %lu\n", 
+                action, pkt.rollingCode, pkt.totp, currentTime);
 
-  ELECHOUSE_cc1101.SendData((uint8_t*)&pkt, sizeof(pkt));
-  delay(100); // Wait for TX, also feeds watchdog
+  // Encrypt
+  uint8_t encryptedPacket[32];
+  encryptPacket(&pkt, encryptedPacket);
+
+  // Add dummy bytes
+  uint8_t transmitBuffer[34];
+  transmitBuffer[0] = 0xAA;
+  transmitBuffer[1] = 0xBB;
+  memcpy(&transmitBuffer[2], encryptedPacket, 32);
+
+  Serial.println(F("Transmitting..."));
+  ELECHOUSE_cc1101.SendData(transmitBuffer, 34);
   
-  Serial.println("Packet sent");
+  delay(50);
+  
+  Serial.println(F("✓ Sent!\n"));
 
   saveCounterIfNeeded();
 }
 
-void listenForSync() {
-  Serial.println("Listening for sync...");
-  unsigned long start = millis();
-  
-  while (millis() - start < 1500) {  // Reduced to 1.5 seconds
-      yield(); // CRITICAL
-      
-      if (ELECHOUSE_cc1101.CheckRxFifo(50)) {  // 50ms timeout
-          yield();
-          byte len = ELECHOUSE_cc1101.ReceiveData(cc1101_data_buffer); 
-          
-          if (len == sizeof(int32_t)) {
-              int32_t newOffset;
-              memcpy(&newOffset, cc1101_data_buffer, sizeof(int32_t)); 
-              timeOffset = newOffset;
-              Serial.printf("Sync received! offset=%ld\n", timeOffset);
-              return;
-          }
-      }
-      
-      delay(100); // Longer delay between checks
-  }
-  Serial.println("No sync");
+// ================= TIME SYNC =================
+
+void hardResetRX() {
+  ELECHOUSE_cc1101.SpiStrobe(0x36); // SIDLE
+  delay(5);
+  ELECHOUSE_cc1101.SpiStrobe(0x3A); // SFRX - flush RX FIFO
+  delay(5);
+  ELECHOUSE_cc1101.SpiStrobe(0x3B); // SFTX - flush TX FIFO  
+  delay(5);
+  ELECHOUSE_cc1101.SetRx();
+  delay(10);
 }
 
-void setup() 
-{
-  // Disable watchdog immediately
-  ESP.wdtDisable();
+void listenForSync() {
+  // Hard reset the RX chain
+  hardResetRX();
   
+  // Check FIFO is empty
+  byte rxBytes = ELECHOUSE_cc1101.SpiReadReg(0x3B) & 0x7F;
+  
+  if (rxBytes > 0) {
+    // Force flush if needed
+    ELECHOUSE_cc1101.SpiStrobe(0x36); // SIDLE
+    delay(10);
+    ELECHOUSE_cc1101.SpiStrobe(0x3A); // SFRX
+    delay(10);
+    
+    // Manually read out junk
+    for (int i = 0; i < rxBytes && i < 64; i++) {
+      ELECHOUSE_cc1101.SpiReadReg(0x3F);
+    }
+    delay(10);
+    
+    ELECHOUSE_cc1101.SetRx();
+    delay(20);
+  }
+  
+  unsigned long start = millis();
+  
+  while (millis() - start < 4000) {
+    // Read FIFO status
+    byte rxBytes = ELECHOUSE_cc1101.SpiReadReg(0x3B) & 0x7F;
+    
+    // We need at least 7 bytes: 1 (length) + 6 (TimeSyncMessage)
+    if (rxBytes >= 7) {
+      // Read the length byte first
+      byte firstByte = ELECHOUSE_cc1101.SpiReadReg(0x3F);
+      
+      // Now read the rest
+      int bytesToRead = min((int)firstByte, 60);
+      if (bytesToRead > 0 && bytesToRead <= 60) {
+        for (int i = 0; i < bytesToRead; i++) {
+          cc1101_data_buffer[i] = ELECHOUSE_cc1101.SpiReadReg(0x3F);
+        }
+        
+        // Look for time sync message
+        int maxOffset = min(5, bytesToRead - (int)sizeof(TimeSyncMessage));
+        
+        for (int offset = 0; offset <= maxOffset; offset++) {
+          if (offset + sizeof(TimeSyncMessage) > bytesToRead) break;
+          
+          TimeSyncMessage msg;
+          memcpy(&msg, &cc1101_data_buffer[offset], sizeof(TimeSyncMessage));
+          
+          if (msg.type == MSG_TIME_SYNC) {
+            uint8_t expectedChecksum = calcChecksum((uint8_t*)&msg, sizeof(TimeSyncMessage) - 1);
+            
+            if (msg.checksum == expectedChecksum) {
+              Serial.println("✓ Time sync successful");
+              Serial.printf("Time updated: %lu -> %lu (diff: %ld sec)\n", 
+                          currentTime, msg.timestamp, (int32_t)(msg.timestamp - currentTime));
+              
+              currentTime = msg.timestamp;
+              lastSecondUpdate = millis();
+              
+              hardResetRX();
+              return;
+            }
+          }
+        }
+      }
+      
+      // Reset for next attempt
+      hardResetRX();
+    }
+    
+    delay(20);
+  }
+  
+  Serial.println("✗ Time sync failed (timeout)");
+  
+  // Final cleanup
+  hardResetRX();
+}
+
+// ================= SETUP =================
+
+void setup() {
   Serial.begin(115200);
-  delay(200);
+  delay(100);
   
-  Serial.println("\n\n=== Keyfob Starting ===");
+  Serial.println(F("\n\n╔═══════════════════════════════╗"));
+  Serial.println(F("║   SECURE KEYFOB - ESP32       ║"));
+  Serial.println(F("╚═══════════════════════════════╝\n"));
   
   EEPROM.begin(512);
-  yield();
 
   pinMode(BTN_UNLOCK, INPUT_PULLUP);
   pinMode(BTN_LOCK, INPUT_PULLUP);
-  yield();
 
   EEPROM.get(EEPROM_ADDR, rollingCounter);
   lastSavedCounter = rollingCounter;
   Serial.printf("Rolling counter: %lu\n", rollingCounter);
-  yield();
 
-  Serial.println("Initializing CC1101...");
   cc1101initialize();
-  yield();
 
   if (ELECHOUSE_cc1101.getCC1101()) {
-    Serial.println("CC1101 OK");
+    Serial.println(F("✓ CC1101 OK"));
   } else {
-    Serial.println("CC1101 ERROR!");
+    Serial.println(F("✗ CC1101 error!"));
     while(1) {
       delay(1000);
     }
   }
   
   ELECHOUSE_cc1101.SetRx();
-  delay(100);
+  delay(50);
   
-  Serial.println("=== Ready ===\n");
+  Serial.println(F("✓ Ready!\n"));
+  
+  lastSecondUpdate = millis();
 }
 
-void loop() 
-{
-  yield(); // Feed watchdog at start of every loop
+// ================= LOOP =================
+
+void loop() {
+  // Update time
+  if (millis() - lastSecondUpdate >= 1000) {
+    currentTime++;
+    lastSecondUpdate = millis();
+  }
   
-  unsigned long currentTime = millis();
+  unsigned long currentMillis = millis();
   
-  // Handle UNLOCK button
+  // UNLOCK button
   bool unlockPressed = (digitalRead(BTN_UNLOCK) == LOW);
   
   if (unlockPressed && !unlockProcessed) {
-    if (currentTime - lastUnlockPress > DEBOUNCE_DELAY) {
-      Serial.println("\n>>> UNLOCK <<<");
+    if (currentMillis - lastUnlockPress > DEBOUNCE_DELAY) {
+      Serial.println("\n=== UNLOCK ===");
       
-      // Disable interrupts during critical section
-      noInterrupts();
       ELECHOUSE_cc1101.SetTx();
-      interrupts();
-      
-      delay(50);
-      yield();
+      delay(100);
       
       sendPacket(ACTION_UNLOCK);
       
-      noInterrupts();
-      ELECHOUSE_cc1101.SetRx();
-      interrupts();
-      
       delay(50);
-      yield();
+      
+      ELECHOUSE_cc1101.SetRx();
+      delay(100);
       
       listenForSync();
       
       unlockProcessed = true;
-      lastUnlockPress = currentTime;
-      
-      Serial.println(">>> Done <<<\n");
+      lastUnlockPress = currentMillis;
     }
   } else if (!unlockPressed) {
     unlockProcessed = false;
   }
   
-  yield(); // Feed watchdog between button checks
-  
-  // Handle LOCK button
+  // LOCK button
   bool lockPressed = (digitalRead(BTN_LOCK) == LOW);
   
   if (lockPressed && !lockProcessed) {
-    if (currentTime - lastLockPress > DEBOUNCE_DELAY) {
-      Serial.println("\n>>> LOCK <<<");
+    if (currentMillis - lastLockPress > DEBOUNCE_DELAY) {
+      Serial.println("\n=== LOCK ===");
       
-      noInterrupts();
       ELECHOUSE_cc1101.SetTx();
-      interrupts();
-      
-      delay(50);
-      yield();
+      delay(100);
       
       sendPacket(ACTION_LOCK);
       
-      noInterrupts();
-      ELECHOUSE_cc1101.SetRx();
-      interrupts();
-      
       delay(50);
-      yield();
+      
+      ELECHOUSE_cc1101.SetRx();
+      delay(100);
       
       listenForSync();
       
       lockProcessed = true;
-      lastLockPress = currentTime;
-      
-      Serial.println(">>> Done <<<\n");
+      lastLockPress = currentMillis;
     }
   } else if (!lockPressed) {
     lockProcessed = false;
   }
   
-  delay(50); // Prevent tight looping, feeds watchdog
+  delay(10);
 }
